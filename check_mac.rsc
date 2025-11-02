@@ -7,6 +7,18 @@
 :local ifName "ether2";# <-- PASTE YOUR INTERFACE NAME HERE
 # Name of task in scheduler.
 :local scheduleName "checkMacSchedule";# <-- PASTE YOUR SCHEDULE NAME HERE
+# Telegram settings
+:global telegramNotificationsEnabled false;# <-- PASTE 'true' TO ENABLE TELEGRAM NOTIFICATIONS
+# Bot token (e.g. 1234567890:ABCdefGHIjklMNOpqrSTUvwxYZ1234567890) [use https://t.me/botfather]
+:global telegramBotToken "TELEGRAM_BOT_TOKEN";# <-- PASTE YOUR TELEGRAM BOT TOKEN HERE
+# Chat id (e.g. -1008978939616) [use https://api.telegram.org/bot<your_bot_token>/getUpdates]
+:global telegramChatId "TELEGRAM_CHAT_ID";# <-- PASTE YOUR TELEGRAM CHAT ID HERE
+# Telegram header
+:local hostname [/system/identity/get name];
+:local model [/system/routerboard/get board-name];
+:global telegramMessageHeader ("⚠️ WARNING! ⚠️ %0A%0AHost: ".$hostname." [MikroTik ".$model."]%0A%0A");
+# File name to contain last http response
+:global telegramFileName "telegramLastResponse.txt";
 # Schedule interval (Used for logging only)
 :local scheduleInterval "1 min";
 # Script message prefix
@@ -17,10 +29,50 @@
 ##
 ### END script settings
 
+# Function
+:global sentOnTelegram do={
+
+    :local messageText ($message);
+
+    :global telegramNotificationsEnabled;
+
+    :if ($telegramNotificationsEnabled = true) do={
+        :global telegramBotToken;
+        :global telegramChatId;
+        :global telegramMessageHeader;
+        :global telegramFileName;
+
+        :local telegramMessage ($telegramMessageHeader."".$messageText);
+        :local url ("https://api.telegram.org/bot".$telegramBotToken."/sendMessage\?chat_id=".$telegramChatId."&text=".$telegramMessage);
+        /log/error $url
+        /log/error $telegramFileName
+        /tool/fetch url=$url dst-path=$telegramFileName;
+        /log/info ($msgPrefix." Notification sent on Telegram");
+    }
+}
+
 # Function 
 :local endScript do={
-    /log/info $withMessage;
-    :error $withMessage;
+
+    :local message ($withMessage);
+    /log/info $message; # put message into log
+
+    :local notification ($notifi);
+
+    :if ([:len $notification] = 0) do={
+        :set notification true; # notification enabled by default
+    }
+    
+    :if ($notification = true) do={
+
+        /log/info "notification is TRUE";
+
+        :global sentOnTelegram
+        $sentOnTelegram message=$message
+        # add more notification types here
+    }
+
+    :error $message;  # end of script
 }
 
 # Function
@@ -37,7 +89,7 @@
 # If link is down
 # End Script
 :if (![/interface/ethernet/get $ifName running]) do={
-    $endScript withMessage=($msgPrefix." Interface ".$ifName." is DOWN. Aborting.");
+    $endScript withMessage=($msgPrefix." Interface ".$ifName." is DOWN. Aborting.") notifi=false;
 }
 
 :local macAddressCount [:tonum [:len $currentMacAddresses]];
@@ -51,7 +103,7 @@
     :local mac [/interface/bridge/host/get [:pick $currentMacAddresses 0] mac-address];
 
     :if ($mac = $expectedMac) do={
-        $endScript withMessage=($msgPrefix." Interface ".$ifName." done!");  # Successful check
+        $endScript withMessage=($msgPrefix." Interface ".$ifName." done!") notifi=false;  # Successful check
     } else={
         /log error ($msgPrefix."Interface ".$ifName.": MAC address does not match the expected value. Disabling interface...")
         $disableInterface ifName=$ifName msgPrefix=$msgPrefix;
